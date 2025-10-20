@@ -128,9 +128,12 @@ func openRootInRoot(r *Root, name string) (*Root, error) {
 
 // rootOpenFileNolog is Root.OpenFile.
 func rootOpenFileNolog(root *Root, name string, flag int, perm FileMode) (*File, error) {
-	fd, err := doInRoot(root, name, nil, func(parent syscall.Handle, name string) (syscall.Handle, error) {
-		return openat(parent, name, uint64(flag), perm)
-	})
+	fd, err := windows.Openat(dirfd, name, flag|syscall.O_CLOEXEC|windows.O_NOFOLLOW_ANY, syscallMode(perm))
+	if err == syscall.ELOOP {
+		fd, err = doInRoot(root, name, nil, func(parent syscall.Handle, name string) (syscall.Handle, error) {
+			return openat(parent, name, uint64(flag), perm)
+		})
+	}
 	if err != nil {
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}

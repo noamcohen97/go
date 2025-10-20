@@ -78,28 +78,39 @@ func openRootInRoot(r *Root, name string) (*Root, error) {
 	return newRoot(fd, joinPath(r.Name(), name))
 }
 
+var rootOpenFileNologFast func(root *Root, name string, flag int, perm FileMode) (int, error)
+
 // rootOpenFileNolog is Root.OpenFile.
 func rootOpenFileNolog(root *Root, name string, flag int, perm FileMode) (*File, error) {
-	fd, err := doInRoot(root, name, nil, func(parent int, name string) (fd int, err error) {
-		ignoringEINTR(func() error {
-			fd, err = unix.Openat(parent, name, syscall.O_NOFOLLOW|syscall.O_CLOEXEC|flag, uint32(perm))
-			if err != nil {
-				// Never follow symlinks when O_CREATE|O_EXCL, no matter
-				// what error the OS returns.
-				isCreateExcl := flag&(O_CREATE|O_EXCL) == (O_CREATE | O_EXCL)
-				if !isCreateExcl && (isNoFollowErr(err) || err == syscall.ENOTDIR) {
-					err = checkSymlink(parent, name, err)
+	var fd int
+	var err error
+
+	if rootOpenFileNologFast != nil {
+		fd, err = rootOpenFileNologFast(root, name, flag, perm)
+	}
+
+	if rootOpenFileNologFast == nil || err == syscall.EAGAIN {
+		fd, err = doInRoot(root, name, nil, func(parent int, name string) (fd int, err error) {
+			ignoringEINTR(func() error {
+				fd, err = unix.Openat(parent, name, syscall.O_NOFOLLOW|syscall.O_CLOEXEC|flag, uint32(perm))
+				if err != nil {
+					// Never follow symlinks when O_CREATE|O_EXCL, no matter
+					// what error the OS returns.
+					isCreateExcl := flag&(O_CREATE|O_EXCL) == (O_CREATE | O_EXCL)
+					if !isCreateExcl && (isNoFollowErr(err) || err == syscall.ENOTDIR) {
+						err = checkSymlink(parent, name, err)
+					}
+					// AIX returns ELOOP instead of EEXIST for a dangling symlink.
+					// Convert this to EEXIST so it matches ErrExists.
+					if isCreateExcl && err == syscall.ELOOP {
+						err = syscall.EEXIST
+					}
 				}
-				// AIX returns ELOOP instead of EEXIST for a dangling symlink.
-				// Convert this to EEXIST so it matches ErrExists.
-				if isCreateExcl && err == syscall.ELOOP {
-					err = syscall.EEXIST
-				}
-			}
-			return err
+				return err
+			})
+			return fd, err
 		})
-		return fd, err
-	})
+	}
 	if err != nil {
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}
