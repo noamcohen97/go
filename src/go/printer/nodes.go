@@ -123,6 +123,24 @@ const filteredMsg = "contains filtered or unexported fields"
 // so that we can use the algorithm for any kind of list
 //
 //	(e.g., pass list via a channel over which to range).
+
+// log2 returns an approximation to log₂(x).
+// The approximation is guaranteed to produce identical results
+// across all architectures.
+func log2(x float64) float64 {
+	f, e := math.Frexp(x)
+	return float64(e) + 2*(f-1)
+}
+
+// exp2 returns an approximation to 2**x.
+// The approximation is guaranteed to produce identical results
+// across all architectures.
+func exp2(x float64) float64 {
+	n := math.Floor(x)
+	f := x - n
+	return math.Ldexp(1+f, int(n))
+}
+
 func (p *printer) exprList(prev0 token.Pos, list []ast.Expr, depth int, mode exprListMode, next0 token.Pos, isIncomplete bool) {
 	if len(list) == 0 {
 		if isIncomplete {
@@ -183,9 +201,9 @@ func (p *printer) exprList(prev0 token.Pos, list []ast.Expr, depth int, mode exp
 
 	// We use the ratio between the geometric mean of the previous key sizes and
 	// the current size to determine if there should be a break in the alignment.
-	// To compute the geometric mean we accumulate the ln(size) values (lnsum)
+	// To compute the geometric mean we accumulate the log₂(size) values (log2sum)
 	// and the number of sizes included (count).
-	lnsum := 0.0
+	log2sum := 0.0
 	count := 0
 
 	// print all list elements
@@ -228,8 +246,8 @@ func (p *printer) exprList(prev0 token.Pos, list []ast.Expr, depth int, mode exp
 			if count == 0 || prevSize <= smallSize && size <= smallSize {
 				useFF = false
 			} else {
-				const r = 2.5                               // threshold
-				geomean := math.Exp(lnsum / float64(count)) // count > 0
+				const r = 2.5                             // threshold
+				geomean := exp2(log2sum / float64(count)) // count > 0
 				ratio := float64(size) / geomean
 				useFF = r*ratio <= 1 || r <= ratio
 			}
@@ -260,7 +278,7 @@ func (p *printer) exprList(prev0 token.Pos, list []ast.Expr, depth int, mode exp
 				// the section), reset the geomean variables since we are
 				// starting a new group of elements with the next element.
 				if nbreaks > 1 {
-					lnsum = 0
+					log2sum = 0
 					count = 0
 				}
 			}
@@ -284,7 +302,7 @@ func (p *printer) exprList(prev0 token.Pos, list []ast.Expr, depth int, mode exp
 		}
 
 		if size > 0 {
-			lnsum += math.Log(float64(size))
+			log2sum += log2(float64(size))
 			count++
 		}
 
